@@ -4,73 +4,73 @@ module Q = Queue.Queue
 
 (** Programs *)
 
+type unop =
+  | Deref
+  | Lnot  (* bitwise    *)
+  | Neg   (* arithmetic *)
+  | Not   (* boolean    *)
+
+type binop =
+  (* bitwise *)
+  | Land | Lor | Lxor | Lsl | Lsr
+  (* arithmetic *)
+  | Add | Sub | Mul | Div | Mod
+  (* boolean *)
+  | Eq | Neq | Lt | Lte | Gt | Gte | Conj | Disj
+
 type expr =
   | Int   of int
-  | Deref of expr
-  (* bitwise *)
-  | Lnot  of expr
-  | Land  of expr * expr
-  | Lor   of expr * expr
-  | Lxor  of expr * expr
-  | Lsl   of expr * expr
-  | Lsr   of expr * expr
-  (* arithmetic *)
-  | Neg   of expr
-  | Add   of expr * expr
-  | Sub   of expr * expr
-  | Mul   of expr * expr
-  | Div   of expr * expr
-  | Mod   of expr * expr
-  (* boolean *)
-  | Not   of expr
-  | Eq    of expr * expr
-  | Neq   of expr * expr
-  | Lt    of expr * expr
-  | Lte   of expr * expr
-  | Gt    of expr * expr
-  | Gte   of expr * expr
-  | Conj  of expr * expr
-  | Disj  of expr * expr
-  (* conditional *)
-  | Cond  of expr * expr * expr
+  | Unop  of unop  * expr
+  | Binop of binop * expr * expr
+  | Cond  of expr  * expr * expr
+  (* only for source programs *)
+  | Lbl   of string
+
+let string_of_unop = function
+  | Deref -> "@"
+  | Lnot  -> "~"
+  | Neg   -> "-"
+  | Not   -> "!"
+
+let string_of_binop = function
+  | Land -> "&"
+  | Lor  -> "|"
+  | Lxor -> "^"
+  | Lsl  -> "<<"
+  | Lsr  -> ">>"
+  | Add  -> "+"
+  | Sub  -> "-"
+  | Mul  -> "*"
+  | Div  -> "/"
+  | Mod  -> "%"
+  | Eq   -> "=="
+  | Neq  -> "!="
+  | Lt   -> "<"
+  | Lte  -> "<="
+  | Gt   -> ">"
+  | Gte  -> ">="
+  | Conj -> "&&"
+  | Disj -> "||"
 
 let rec string_of_expr = function
-  | Int   i        -> string_of_int i
-  | Deref e1       -> string_of_uop "@"  e1
-  | Lnot  e1       -> string_of_uop "~"  e1
-  | Land  (e1, e2) -> string_of_bop "&"  e1 e2
-  | Lor   (e1, e2) -> string_of_bop "|"  e1 e2
-  | Lxor  (e1, e2) -> string_of_bop "^"  e1 e2
-  | Lsl   (e1, e2) -> string_of_bop "<<" e1 e2
-  | Lsr   (e1, e2) -> string_of_bop ">>" e1 e2
-  | Neg   e1       -> string_of_uop "-"  e1
-  | Add   (e1, e2) -> string_of_bop "+"  e1 e2
-  | Sub   (e1, e2) -> string_of_bop "-"  e1 e2
-  | Mul   (e1, e2) -> string_of_bop "*"  e1 e2
-  | Div   (e1, e2) -> string_of_bop "/"  e1 e2
-  | Mod   (e1, e2) -> string_of_bop "%"  e1 e2
-  | Not   e1       -> string_of_uop "!"  e1
-  | Eq    (e1, e2) -> string_of_bop "==" e1 e2
-  | Neq   (e1, e2) -> string_of_bop "!=" e1 e2
-  | Lt    (e1, e2) -> string_of_bop "<"  e1 e2
-  | Lte   (e1, e2) -> string_of_bop "<=" e1 e2
-  | Gt    (e1, e2) -> string_of_bop ">"  e1 e2
-  | Gte   (e1, e2) -> string_of_bop ">=" e1 e2
-  | Conj  (e1, e2) -> string_of_bop "&&" e1 e2
-  | Disj  (e1, e2) -> string_of_bop "||" e1 e2
-  | Cond (e1, e2, e3) ->
+  | Int i ->
+      string_of_int i
+  | Unop (op, e1) ->
+      Printf.sprintf "%s%s"
+        (string_of_unop op)
+        (string_of_expr e1)
+  | Binop (op, e1, e2) ->
+      Printf.sprintf "(%s %s %s)"
+        (string_of_expr  e1)
+        (string_of_binop op)
+        (string_of_expr  e2)
+  | Cond  (e1, e2, e3) ->
       Printf.sprintf "(%s ? %s : %s)"
         (string_of_expr e1)
         (string_of_expr e2)
         (string_of_expr e3)
-
-and string_of_uop op e1 =
-  Printf.sprintf "%s%s"
-    op (string_of_expr e1)
-
-and string_of_bop op e1 e2 =
-  Printf.sprintf "(%s %s %s)"
-    (string_of_expr e1) op (string_of_expr e2)
+  | Lbl l ->
+      l
 
 type cell =
   | Data of int
@@ -82,7 +82,7 @@ let string_of_cell = function
   | Data i ->
       Printf.sprintf "Data %d" i
   | Asgn (e1, e2) ->
-      Printf.sprintf "%s <-- %s"
+      Printf.sprintf "%s <- %s"
         (string_of_expr e1)
         (string_of_expr e2)
   | Cjmp (e1, e2) ->
@@ -92,6 +92,49 @@ let string_of_cell = function
   | Spwn e1 ->
       Printf.sprintf "spawn %s"
         (string_of_expr e1)
+
+type source = (string * cell) list
+
+let string_of_source src =
+  src |> List.map (fun (lbl, cell) ->
+          Printf.sprintf "%8s: %s"
+            lbl (string_of_cell cell))
+      |> String.concat "\n"
+
+exception Label of string
+
+let assemble src =
+  let labtab =
+    src |> List.map fst
+        |> List.mapi (flip pair)
+  in
+  let labref pos lab =
+    try List.assoc lab labtab - pos
+    with Not_found -> raise (Label lab)
+  in
+  let rec delab_e pos = function
+    | Int i ->
+        Int i
+    | Unop (op, e1) ->
+        Unop (op, delab_e pos e1)
+    | Binop (op, e1, e2) ->
+        Binop (op, delab_e pos e1
+                 , delab_e pos e2)
+    | Cond (e1, e2, e3) ->
+        Cond ( delab_e pos e1
+             , delab_e pos e2
+             , delab_e pos e3)
+    | Lbl l ->
+        Int (labref pos l)
+  in
+  let delab_c pos = function
+    | Data i        -> Data i
+    | Asgn (e1, e2) -> Asgn (delab_e pos e1, delab_e pos e2)
+    | Cjmp (e1, e2) -> Cjmp (delab_e pos e1, delab_e pos e2)
+    | Spwn e1       -> Spwn (delab_e pos e1)
+  in
+  src |> List.map snd
+      |> List.mapi delab_c
 
 type prog = cell list
 
@@ -237,50 +280,61 @@ let step_p mem color proc =
     else a mod b
   in
   let rec eval_e = function
-    | Int i   -> Data i
-    | Deref a -> read (eval_e a)
-    (* bitwise *)
-    | Lnot a      -> evali_uop (lnot) a
-    | Land (a, b) -> evali_bop (land) a b
-    | Lor  (a, b) -> evali_bop (lor)  a b
-    | Lxor (a, b) -> evali_bop (lxor) a b
-    | Lsl  (a, b) -> evali_bop (lsl)  a b
-    | Lsr  (a, b) -> evali_bop (lsr)  a b
-    (* arithmetic *)
-    | Neg  a      -> evali_uop (~-)  a
-    | Add  (a, b) -> evali_bop (+)   a b
-    | Sub  (a, b) -> evali_bop (-)   a b
-    | Mul  (a, b) -> evali_bop ( * ) a b
-    | Div  (a, b) -> evali_bop _div  a b
-    | Mod  (a, b) -> evali_bop _mod  a b
-    (* boolean *)
-    | Not  a      -> evali_uop (liftb_uop not) a
-    | Eq   (a, b) -> Data (iob (eval_e a =  eval_e b))
-    | Neq  (a, b) -> Data (iob (eval_e a <> eval_e b))
-    | Lt   (a, b) -> evali_bop (liftb_bop (<))  a b
-    | Lte  (a, b) -> evali_bop (liftb_bop (<=)) a b
-    | Gt   (a, b) -> evali_bop (liftb_bop (>))  a b
-    | Gte  (a, b) -> evali_bop (liftb_bop (>=)) a b
-    | Conj (a, b) ->
-        if boi (data (eval_e a))
-        then Data (iob (boi (data (eval_e b))))
-        else Data (iob false)
-    | Disj (a, b) ->
-        if boi (data (eval_e a))
-        then Data (iob true)
-        else Data (iob (boi (data (eval_e b))))
-    (* conditional *)
+    | Int i ->
+        Data i
+    | Unop (op, a) ->
+        evali_uop op a
+    | Binop (op, a, b) ->
+        evali_bop op a b
     | Cond (a, b, c) ->
         if boi (data (eval_e a))
         then eval_e b
         else eval_e c
+    (* only for source programs *)
+    | Lbl l ->
+        bogus "tried to reference label"
 
   and evali_uop op a =
-    Data (op (data (eval_e a)))
+    let aux f =
+      Data (f (data (eval_e a)))
+    in
+    match op with
+    | Deref -> read (eval_e a)
+    | Lnot  -> aux (lnot)
+    | Neg   -> aux (~-)
+    | Not   -> aux (liftb_uop not)
 
   and evali_bop op a b =
-    Data (op (data (eval_e a))
-             (data (eval_e b)))
+    let aux f =
+      Data (f (data (eval_e a))
+              (data (eval_e b)))
+    in
+    match op with
+    | Land -> aux (land)
+    | Lor  -> aux (lor)
+    | Lxor -> aux (lxor)
+    | Lsl  -> aux (lsl)
+    | Lsr  -> aux (lsr)
+    | Add  -> aux (+)
+    | Sub  -> aux (-)
+    | Mul  -> aux ( * )
+    | Div  -> aux _div
+    | Mod  -> aux _mod
+    | Eq   -> Data (iob (eval_e a =  eval_e b))
+    | Neq  -> Data (iob (eval_e a <> eval_e b))
+    | Lt   -> aux (liftb_bop (<))
+    | Lte  -> aux (liftb_bop (<=))
+    | Gt   -> aux (liftb_bop (>))
+    | Gte  -> aux (liftb_bop (>=))
+    | Conj ->
+        if boi (data (eval_e a))
+        then Data (iob (boi (data (eval_e b))))
+        else Data (iob false)
+    | Disj ->
+        if boi (data (eval_e a))
+        then Data (iob true)
+        else Data (iob (boi (data (eval_e b))))
+
   in
   let write c1 c2 =
     store mem
@@ -413,16 +467,16 @@ let disp_term w dur (mem, players) =
   flush stdout;
   nap dur
 
-let imp =
-  [ Asgn (Int 1, Deref (Int 0)) ]
+let imp = assemble
+  [ "imp", Asgn (Int 1, Unop (Deref, Lbl "imp")) ]
 
-let dwarf n =
-  [ Cjmp (Int 1, Int 3)
-  ; Data n
-  ; Data 0
-  ; Asgn (Deref (Int (-2)), Deref (Int (-1)))
-  ; Asgn (Int (-3), Add (Deref (Int (-3)), Int n))
-  ; Cjmp (Int 1, Int (-5))
+let dwarf n = assemble
+  [ "dwarf", Cjmp (Int 1, Int 3)
+  ; "i"    , Data n
+  ; "trap" , Data 0
+  ; ""     , Asgn (Unop (Deref, Lbl "i"), Unop (Deref, Lbl "trap"))
+  ; ""     , Asgn (Lbl "i", Binop (Add, Unop (Deref, Lbl "i"), Int n))
+  ; ""     , Cjmp (Int (iob true), Lbl "dwarf")
   ]
 
 let () =
