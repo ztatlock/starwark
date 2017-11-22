@@ -1,5 +1,7 @@
 open Util
 
+module Q = Queue.Queue
+
 (** Programs *)
 
 type expr =
@@ -74,7 +76,7 @@ type cell =
   | Data of int
   | Asgn of expr * expr
   | Cjmp of expr * expr
-  | Fork of expr
+  | Spwn of expr
 
 let string_of_cell = function
   | Data i ->
@@ -87,8 +89,8 @@ let string_of_cell = function
       Printf.sprintf "if %s goto %s"
         (string_of_expr e1)
         (string_of_expr e2)
-  | Fork e1 ->
-      Printf.sprintf "fork %s"
+  | Spwn e1 ->
+      Printf.sprintf "spawn %s"
         (string_of_expr e1)
 
 type prog = cell list
@@ -129,12 +131,13 @@ let string_of_proc p =
 type player =
   { name  : string
   ; color : color
-  ; procs : proc list
+  ; procs : proc Q.t
   }
 
 let string_of_player p =
   let pcs =
     p.procs
+      |> Q.to_list
       |> List.map string_of_proc
       |> String.concat " "
   in
@@ -144,10 +147,11 @@ let string_of_player p =
     pcs
 
 type state =
-  mem * (player list)
+  mem * (player Q.t)
 
 let string_of_queue q =
-  q |> List.map string_of_player
+  q |> Q.to_list
+    |> List.map string_of_player
     |> String.concat "\n"
 
 let string_of_state (mem, queue) =
@@ -195,12 +199,13 @@ let init_state n pps =
     install_prog mem color start prog;
     { name  = name
     ; color = color
-    ; procs = [{pc = start}]
+    ; procs = Q.single {pc = start}
     }
   in
   pps |> List.sort cmp_pp
       |> List.mapi aux
       |> List.rev
+      |> Q.pushl Q.empty
       |> pair mem
 
 (* cleaner than monads in OCaml *)
@@ -292,41 +297,41 @@ let step_p mem color proc =
       if boi (data (eval_e e1))
       then [{pc = proc.pc + data (eval_e e2)}]
       else [{pc = proc.pc + 1}]
-  | Fork e1 ->
+  | Spwn e1 ->
       [ {pc = proc.pc + 1}
       ; {pc = proc.pc + data (eval_e e1)}
       ]
 
 let step (mem, players) =
-  match players with
-  | [] -> (* all players' procs crashed *)
-      (mem, [])
-  | pl :: pls ->
-      begin match pl.procs with
-      | [] -> (* all pl's procs crashed *)
+  match Q.pop players with
+  | None -> (* all players' procs crashed *)
+      (mem, Q.empty)
+  | Some (pl, pls) ->
+      begin match Q.pop pl.procs with
+      | None -> (* all pl's procs crashed *)
           (mem, pls)
-      | p :: ps ->
+      | Some (p, ps) ->
           try
             let ps' = step_p mem pl.color p in
-            (mem, pls @ [{pl with procs = ps @ ps'}])
+            let pl' = {pl with procs = Q.pushl ps ps'} in
+            (mem, Q.push pls pl')
           with Bogus msg -> (* p crashed *)
-            (mem, pls @ [{pl with procs = ps}])
+            let pl' = {pl with procs = ps} in
+            (mem, Q.push pls pl')
       end
 
 let draw (mem, players) =
-  match players with
-  | [] -> true
-  | _  -> false
+  Q.is_empty players
 
 let winner (mem, players) =
-  match players with
-  | [] -> None
-  | pl :: [] ->
-      begin match pl.procs with
-      | [] -> None
-      | _  -> Some pl.name
-      end
-  | _ -> None
+  match Q.pop players with
+  | None -> None
+  | Some (pl, pls) ->
+      if Q.is_empty pls
+      then if Q.is_empty pl.procs
+           then None
+           else Some pl.name
+      else None
 
 type res =
   | Draw
@@ -424,8 +429,8 @@ let () =
   at_exit (fun () ->
     (* enable cursor *)
     Printf.printf "\027[?25h");
-  let w = 64 in
-  let h = 32 in
+  let w = 150 in
+  let h = 40 in
   let s =
     init_state (w * h)
       [ ("A", imp)
