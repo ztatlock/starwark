@@ -8,6 +8,7 @@ type unop =
   | Deref
   | Lnot  (* bitwise    *)
   | Neg   (* arithmetic *)
+  | Pos
   | Not   (* boolean    *)
 
 type binop =
@@ -16,7 +17,7 @@ type binop =
   (* arithmetic *)
   | Add | Sub | Mul | Div | Mod
   (* boolean *)
-  | Eq | Neq | Lt | Lte | Gt | Gte | Conj | Disj
+  | Eq | Neq | Lt | Le | Gt | Ge | Conj | Disj
 
 type expr =
   | Int   of int
@@ -26,10 +27,17 @@ type expr =
   (* only for source programs *)
   | Lbl   of string
 
+let unop op e =
+  Unop (op, e)
+
+let binop op e1 e2 =
+  Binop (op, e1, e2)
+
 let string_of_unop = function
-  | Deref -> "@"
+  | Deref -> "*"
   | Lnot  -> "~"
   | Neg   -> "-"
+  | Pos   -> "+"
   | Not   -> "!"
 
 let string_of_binop = function
@@ -46,9 +54,9 @@ let string_of_binop = function
   | Eq   -> "=="
   | Neq  -> "!="
   | Lt   -> "<"
-  | Lte  -> "<="
+  | Le   -> "<="
   | Gt   -> ">"
-  | Gte  -> ">="
+  | Ge   -> ">="
   | Conj -> "&&"
   | Disj -> "||"
 
@@ -302,6 +310,7 @@ let step_p mem color proc =
     | Deref -> read (eval_e a)
     | Lnot  -> aux (lnot)
     | Neg   -> aux (~-)
+    | Pos   -> aux (~+)
     | Not   -> aux (liftb_uop not)
 
   and evali_bop op a b =
@@ -323,9 +332,9 @@ let step_p mem color proc =
     | Eq   -> Data (iob (eval_e a =  eval_e b))
     | Neq  -> Data (iob (eval_e a <> eval_e b))
     | Lt   -> aux (liftb_bop (<))
-    | Lte  -> aux (liftb_bop (<=))
+    | Le   -> aux (liftb_bop (<=))
     | Gt   -> aux (liftb_bop (>))
-    | Gte  -> aux (liftb_bop (>=))
+    | Ge   -> aux (liftb_bop (>=))
     | Conj ->
         if boi (data (eval_e a))
         then Data (iob (boi (data (eval_e b))))
@@ -466,34 +475,3 @@ let disp_term w dur (mem, players) =
   Array.iteri aux mem;
   flush stdout;
   nap dur
-
-let imp = assemble
-  [ "imp", Asgn (Int 1, Unop (Deref, Lbl "imp")) ]
-
-let dwarf n = assemble
-  [ "dwarf", Cjmp (Int 1, Int 3)
-  ; "i"    , Data n
-  ; "trap" , Data 0
-  ; ""     , Asgn (Unop (Deref, Lbl "i"), Unop (Deref, Lbl "trap"))
-  ; ""     , Asgn (Lbl "i", Binop (Add, Unop (Deref, Lbl "i"), Int n))
-  ; ""     , Cjmp (Int (iob true), Lbl "dwarf")
-  ]
-
-let () =
-  at_exit (fun () ->
-    (* enable cursor *)
-    Printf.printf "\027[?25h");
-  let w = 150 in
-  let h = 40 in
-  let s =
-    init_state (w * h)
-      [ ("A", imp)
-      ; ("B", dwarf 593)
-      ; ("C", dwarf 1171)
-      ; ("D", dwarf 7)
-      ]
-  in
-  s |> run (disp_term w 5) 10000
-    |> string_of_res
-    >> (fun _ -> print_newline ())
-    |> print_endline

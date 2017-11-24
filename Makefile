@@ -4,11 +4,11 @@ PACKS = $(packs:%=-package %)
 libs  = str unix
 LIBS  = $(libs:%=-lib %)
 
-DEP = *.ml
-OCB = ocamlbuild $(LIBS) $(PACKS)
+DEP = *.ml *.mll *.mly
+OCB = ocamlbuild -use-menhir -yaccflags --explain $(LIBS) $(PACKS)
 
 .PHONY: default
-default: StarWark.native
+default: Main.native
 
 .PHONY: all
 all: default
