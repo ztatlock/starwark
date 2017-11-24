@@ -25,7 +25,7 @@ rule token = parse
   | "false" { NUM 0 }
   | "true"  { NUM 1 }
 
-  | "*"  { DEREF }
+  | "@"  { DEREF }
   | "~"  { LNOT  }
   | "!"  { NOT   }
   | "&"  { LAND  }

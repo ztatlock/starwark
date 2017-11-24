@@ -39,10 +39,6 @@ let iob = function
 let liftb_uop op i =
   iob (op (boi i))
 
-let liftb_bop op i1 i2 =
-  iob (op (boi i1)
-          (boi i2))
-
 let with_ic path f =
   let ic = Pervasives.open_in path in
   let res = f ic in

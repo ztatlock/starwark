@@ -18,7 +18,7 @@ let imp = prog_of_string "
 #
 # An imp simply copies itself to the next address.
 
-imp : imp + 1 <- *imp
+imp : imp + 1 <- @imp
 
 "
 
@@ -30,9 +30,9 @@ let dwarf = prog_of_string "
 # A dwarf copies a trap to regular intervals throughout memory.
 # This one uses a stride length of 97.
 
-init   : i  <- *stride
-dwarf  : *i <- *trap
-       : i  <- *i + *stride
+init   : i  <- @stride
+dwarf  : @i <- @trap
+       : i  <- @i + @stride
        : goto dwarf
 i      : DATA 0
 trap   : DATA 0
@@ -42,14 +42,38 @@ stride : DATA 97
 
 let spawn_imps = prog_of_string "
 
-init   : i  <- *stride
-loop   : *i <- *imp
-       : spawn (*i - 1)
-       : i  <- *i + *stride
+init   : i  <- @stride
+loop   : @i <- @imp
+       : spawn (@i - 1)
+       : i  <- @i + @stride
        : goto loop
 i      : DATA 0
-imp    : imp + 1 <- *imp
+imp    : imp + 1 <- @imp
 stride : DATA 593
+
+"
+
+let spawn_dwarves = prog_of_string "
+
+init    : i <- @stride
+loop    : @i <- @(dwarf + 0)
+        : @i <- @(dwarf + 1)
+        : @i <- @(dwarf + 2)
+        : @i <- @(dwarf + 3)
+        : @i <- @(dwarf + 4)
+        : @i <- @(dwarf + 5)
+        : spawn (@i - 6)
+        : i <- @i + @stride
+        : if (@i < 10 * @stride) goto loop
+imp     : imp + 1 <- @imp
+i       : DATA 0
+stride  : DATA 593
+dwarf   : @di <- @trap
+        : di  <- @di + @dstride
+        : goto dwarf
+di      : DATA 97
+trap    : DATA 0
+dstride : DATA 97
 
 "
 
@@ -63,10 +87,10 @@ let () =
     init_state (w * h)
       [ ("A", imp)
       ; ("B", dwarf)
-      ; ("C", spawn_imps)
+      ; ("C", spawn_dwarves)
       ]
   in
-  s |> run (disp_term w 0) 10000
+  s |> run (disp_term w 0) 100000
     |> string_of_res
     >> (fun _ -> print_newline ())
     |> print_endline

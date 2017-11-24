@@ -34,7 +34,7 @@ let binop op e1 e2 =
   Binop (op, e1, e2)
 
 let string_of_unop = function
-  | Deref -> "*"
+  | Deref -> "@"
   | Lnot  -> "~"
   | Neg   -> "-"
   | Pos   -> "+"
@@ -101,11 +101,19 @@ let string_of_cell = function
       Printf.sprintf "spawn %s"
         (string_of_expr e1)
 
+type prog = cell list
+
+let string_of_prog p =
+  p |> List.mapi (fun i cell ->
+        Printf.sprintf "%3d : %s"
+          i (string_of_cell cell))
+    |> String.concat "\n"
+
 type source = (string * cell) list
 
 let string_of_source src =
   src |> List.map (fun (lbl, cell) ->
-          Printf.sprintf "%8s: %s"
+          Printf.sprintf "%8s : %s"
             lbl (string_of_cell cell))
       |> String.concat "\n"
 
@@ -143,12 +151,6 @@ let assemble src =
   in
   src |> List.map snd
       |> List.mapi delab_c
-
-type prog = cell list
-
-let string_of_prog p =
-  p |> List.map string_of_cell
-    |> String.concat "\n"
 
 (** States *)
 
@@ -287,6 +289,9 @@ let step_p mem color proc =
     then bogus "modulo by zero"
     else a mod b
   in
+  let _cmp op a b =
+    iob (op a b)
+  in
   let rec eval_e = function
     | Int i ->
         Data i
@@ -331,10 +336,10 @@ let step_p mem color proc =
     | Mod  -> aux _mod
     | Eq   -> Data (iob (eval_e a =  eval_e b))
     | Neq  -> Data (iob (eval_e a <> eval_e b))
-    | Lt   -> aux (liftb_bop (<))
-    | Le   -> aux (liftb_bop (<=))
-    | Gt   -> aux (liftb_bop (>))
-    | Ge   -> aux (liftb_bop (>=))
+    | Lt   -> aux (_cmp (<))
+    | Le   -> aux (_cmp (<=))
+    | Gt   -> aux (_cmp (>))
+    | Ge   -> aux (_cmp (>=))
     | Conj ->
         if boi (data (eval_e a))
         then Data (iob (boi (data (eval_e b))))
