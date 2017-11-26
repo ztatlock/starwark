@@ -38,17 +38,18 @@ rule token = parse
   | "*"  { MUL   }
   | "/"  { DIV   }
   | "%"  { MOD   }
-  | "="  { EQ    }
-  | "!=" { NEQ   }
   | "<"  { LT    }
   | "<=" { LE    }
   | ">"  { GT    }
   | ">=" { GE    }
+  | "="  { EQ    }
+  | "!=" { NEQ   }
   | "&&" { CONJ  }
   | "||" { DISJ  }
   | "?"  { HUH   }
   | ":"  { COLON }
 
+  | "data"  { DATA  }
   | "DATA"  { DATA  }
   | "<-"    { LARR  }
   | "if"    { IF    }

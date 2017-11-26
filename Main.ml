@@ -78,10 +78,7 @@ dstride : DATA 97
 "
 
 let () =
-  at_exit (fun () ->
-    (* enable cursor *)
-    Printf.printf "\027[?25h");
-  let w = 150 in
+  let w = 125 in
   let h = 40 in
   let s =
     init_state (w * h)
@@ -90,7 +87,5 @@ let () =
       ; ("C", spawn_dwarves)
       ]
   in
-  s |> run (disp_term w 0) 100000
-    |> string_of_res
-    >> (fun _ -> print_newline ())
-    |> print_endline
+  run (term_disp w 1) 100000 s
+

@@ -5,19 +5,13 @@ module Q = Queue.Queue
 (** Programs *)
 
 type unop =
-  | Deref
-  | Lnot  (* bitwise    *)
-  | Neg   (* arithmetic *)
-  | Pos
-  | Not   (* boolean    *)
+  | Deref | Lnot | Neg | Pos | Not
 
 type binop =
-  (* bitwise *)
-  | Land | Lor | Lxor | Lsl | Lsr
-  (* arithmetic *)
-  | Add | Sub | Mul | Div | Mod
-  (* boolean *)
-  | Eq | Neq | Lt | Le | Gt | Ge | Conj | Disj
+  | Land | Lor | Lxor | Lsl  | Lsr
+  | Add  | Sub | Mul  | Div  | Mod
+  | Lt   | Le  | Gt   | Ge
+  | Eq   | Neq | Conj | Disj
 
 type expr =
   | Int   of int
@@ -51,12 +45,12 @@ let string_of_binop = function
   | Mul  -> "*"
   | Div  -> "/"
   | Mod  -> "%"
-  | Eq   -> "=="
-  | Neq  -> "!="
   | Lt   -> "<"
   | Le   -> "<="
   | Gt   -> ">"
   | Ge   -> ">="
+  | Eq   -> "=="
+  | Neq  -> "!="
   | Conj -> "&&"
   | Disj -> "||"
 
@@ -88,15 +82,21 @@ type cell =
 
 let string_of_cell = function
   | Data i ->
-      Printf.sprintf "Data %d" i
+      Printf.sprintf "DATA %d" i
   | Asgn (e1, e2) ->
       Printf.sprintf "%s <- %s"
         (string_of_expr e1)
         (string_of_expr e2)
   | Cjmp (e1, e2) ->
-      Printf.sprintf "if %s goto %s"
-        (string_of_expr e1)
-        (string_of_expr e2)
+      begin match e1 with
+      | Int 1 ->
+          Printf.sprintf "goto %s"
+            (string_of_expr e2)
+      | _ ->
+          Printf.sprintf "if %s goto %s"
+            (string_of_expr e1)
+            (string_of_expr e2)
+      end
   | Spwn e1 ->
       Printf.sprintf "spawn %s"
         (string_of_expr e1)
@@ -218,6 +218,120 @@ let string_of_state (mem, queue) =
     ; string_of_queue queue
     ]
 
+(** Displays *)
+
+type res =
+  | Draw
+  | Win of string
+
+let string_of_res = function
+  | Draw  -> "Draw"
+  | Win s -> "Winner: " ^ s
+
+type display =
+  { init   : state -> unit
+  ; write  : int * color * cell -> unit
+  ; update : state -> unit
+  ; finish : state * res -> unit
+  }
+
+let default_disp =
+  { init   = ignore
+  ; write  = ignore
+  ; update = ignore
+  ; finish = ignore
+  }
+
+let clear () =
+  print_string "\027[2J";
+  flush stdout
+
+let debug_disp wait =
+  { init   = ignore
+  ; write  = ignore
+  ; update = begin fun st ->
+      clear ();
+      st |> string_of_state
+         |> print_endline;
+      wait ()
+    end
+  ; finish = begin fun (_, res) ->
+      res |> string_of_res
+          |> print_endline
+    end
+  }
+
+let step_disp =
+  debug_disp (fun () -> ignore (read_line ()))
+
+(* sleep for dur milliseconds *)
+let nap dur =
+  dur |> float_of_int
+      |> flip (/.) 1000.0
+      |> Unix.select [] [] []
+      |> ignore
+
+let test_disp dur =
+  debug_disp (fun () -> nap dur)
+
+(* h/t https://github.com/Chris00/ANSITerminal
+ * and https://en.wikipedia.org/wiki/ANSI_escape_code
+ *)
+let term_disp w dur =
+  let string_of_cc (color, cell) =
+    (* TODO support > 5 players *)
+    match int_of_color color, cell with
+    | 0, Data _ -> "\027[1;31m*\027[0m"  (* red *)
+    | 0, _      -> "\027[31m+\027[0m"
+    | 1, Data _ -> "\027[1;32m*\027[0m"  (* green *)
+    | 1, _      -> "\027[32m+\027[0m"
+    | 2, Data _ -> "\027[1;34m*\027[0m"  (* blue *)
+    | 2, _      -> "\027[34m+\027[0m"
+    | 3, Data _ -> "\027[1;36m*\027[0m"  (* cyan *)
+    | 3, _      -> "\027[36m+\027[0m"
+    | 4, Data _ -> "\027[1;37m*\027[0m"  (* white *)
+    | 4, _      -> "\027[37m+\027[0m"
+    | _         -> "."
+  in
+  let disp_mem mem =
+    let aux i cc =
+      if i mod w = 0 then begin
+        (* move cursor to next line *)
+        Printf.printf "\027[E"
+      end;
+      print_string (string_of_cc cc)
+    in
+    clear ();
+    (* move cursor to top left *)
+    Printf.printf "\027[H";
+    Array.iteri aux mem;
+    flush stdout
+  in
+  { init = begin fun (mem, players) ->
+      (* disable cursor *)
+      Printf.printf "\027[?25l";
+      disp_mem mem
+    end
+  ; write = begin fun (addr, color, cell) ->
+      let x = addr mod w + 1 in
+      let y = addr  /  w + 2 in
+      (* move cursor to (x, y) *)
+      Printf.printf "\027[%d;%dH" y x;
+      print_string (string_of_cc (color, cell));
+      flush stdout;
+      if dur > 0 then
+        nap dur
+    end
+  ; update = ignore
+  ; finish = begin fun ((mem, players), res) ->
+      disp_mem mem;
+      (* enable cursor *)
+      Printf.printf "\027[?25h";
+      Printf.printf "\n%s\n"
+        (string_of_res res)
+    end
+  }
+
 (** Interpreter *)
 
 let init_mem n =
@@ -267,7 +381,7 @@ exception Bogus of string
 let bogus msg =
   raise (Bogus msg)
 
-let step_p mem color proc =
+let step_p disp mem color proc =
   let data = function
     | Data i -> i
     | _ -> bogus "inspect non data"
@@ -334,12 +448,12 @@ let step_p mem color proc =
     | Mul  -> aux ( * )
     | Div  -> aux _div
     | Mod  -> aux _mod
-    | Eq   -> Data (iob (eval_e a =  eval_e b))
-    | Neq  -> Data (iob (eval_e a <> eval_e b))
     | Lt   -> aux (_cmp (<))
     | Le   -> aux (_cmp (<=))
     | Gt   -> aux (_cmp (>))
     | Ge   -> aux (_cmp (>=))
+    | Eq   -> Data (iob (eval_e a =  eval_e b))
+    | Neq  -> Data (iob (eval_e a <> eval_e b))
     | Conj ->
         if boi (data (eval_e a))
         then Data (iob (boi (data (eval_e b))))
@@ -351,9 +465,12 @@ let step_p mem color proc =
 
   in
   let write c1 c2 =
-    store mem
-      (proc.pc + data c1)
-      (color, c2)
+    let addr =
+      posmod (proc.pc + data c1)
+             (Array.length mem)
+    in
+    store mem addr (color, c2);
+    disp.write (addr, color, c2)
   in
   match read (Data 0) with
   | Data _ ->
@@ -370,17 +487,19 @@ let step_p mem color proc =
       ; {pc = proc.pc + data (eval_e e1)}
       ]
 
-let step (mem, players) =
+let step disp (mem, players) =
   match Q.pop players with
-  | None -> (* all players' procs crashed *)
+  | None ->
+      (* all players' procs crashed *)
       (mem, Q.empty)
   | Some (pl, pls) ->
       begin match Q.pop pl.procs with
-      | None -> (* all pl's procs crashed *)
+      | None ->
+          (* all pl's procs crashed *)
           (mem, pls)
       | Some (p, ps) ->
           try
-            let ps' = step_p mem pl.color p in
+            let ps' = step_p disp mem pl.color p in
             let pl' = {pl with procs = Q.pushl ps ps'} in
             (mem, Q.push pls pl')
           with Bogus msg -> (* p crashed *)
@@ -401,82 +520,19 @@ let winner (mem, players) =
            else Some pl.name
       else None
 
-type res =
-  | Draw
-  | Win of string
-
-let string_of_res = function
-  | Draw  -> "Draw"
-  | Win s -> "Winner: " ^ s
-
-let rec run ?winstop:(winstop = true) disp tm st =
-  match winner st, winstop with
-  | Some nm, true ->
-      Win nm
-  | _, _ ->
-      if tm <= 0 || draw st then
-        Draw
-      else begin
-        disp st;
-        run disp (tm - 1) (step st)
-      end
-
-let clear () =
-  print_string "\027[2J"
-
-let nap dur =
-  dur |> float_of_int
-      |> flip (/.) 1000.0
-      |> Unix.select [] [] []
-      |> ignore
-
-let debug_disp st =
-  clear ();
-  st |> string_of_state
-     |> print_endline;
-  ignore (read_line ())
-
-let test_disp dur st =
-  clear ();
-  st |> string_of_state
-     |> print_endline;
-  nap dur
-
-(* h/t https://github.com/Chris00/ANSITerminal
- * and https://en.wikipedia.org/wiki/ANSI_escape_code
- *)
-let disp_cell (color, cell) =
-  let s =
-    (* TODO support > 5 players *)
-    match int_of_color color, cell with
-    | 0, Data _ -> "\027[1;31m*\027[0m"  (* red *)
-    | 0, _      -> "\027[31m+\027[0m"
-    | 1, Data _ -> "\027[1;32m*\027[0m"  (* green *)
-    | 1, _      -> "\027[32m+\027[0m"
-    | 2, Data _ -> "\027[1;34m*\027[0m"  (* blue *)
-    | 2, _      -> "\027[34m+\027[0m"
-    | 3, Data _ -> "\027[1;36m*\027[0m"  (* cyan *)
-    | 3, _      -> "\027[36m+\027[0m"
-    | 4, Data _ -> "\027[1;37m*\027[0m"  (* white *)
-    | 4, _      -> "\027[37m+\027[0m"
-    | _         -> "."
+let run ?winstop:(winstop = true) disp tm st =
+  disp.init st;
+  let rec loop i st =
+    match winner st, winstop with
+    | Some nm, true ->
+        (st, Win nm)
+    | _, _ ->
+        if i > tm || draw st then
+          (st, Draw)
+        else begin
+          disp.update st;
+          loop (i + 1) (step disp st)
+        end
   in
-  print_string s
-
-let __dt_init = ref false
-let disp_term w dur (mem, players) =
-  if not !__dt_init then begin
-    Printf.printf "\027[?25l"; (* disable cursor *)
-    clear ();
-    __dt_init := true
-  end;
-  let aux i c =
-    if i mod w = 0 then begin
-      Printf.printf "\027[E" (* next line *)
-    end;
-    disp_cell c
-  in
-  Printf.printf "\027[H"; (* top left *)
-  Array.iteri aux mem;
-  flush stdout;
-  nap dur
+  let (st', res) = loop 0 st in
+  disp.finish (st', res)

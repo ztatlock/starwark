@@ -76,10 +76,8 @@ lines:
       { $3 :: $1 }
 
 line:
-  | COLON cell
-      { ("", $2) }
-  | LBL COLON cell
-      { ($1, $3) }
+  |     COLON cell { ("", $2) }
+  | LBL COLON cell { ($1, $3) }
 
 cell:
   | DATA NUM          { Data $2          }
@@ -113,12 +111,12 @@ expr :
   | expr MUL  expr { binop Mul  $1 $3 }
   | expr DIV  expr { binop Div  $1 $3 }
   | expr MOD  expr { binop Mod  $1 $3 }
-  | expr EQ   expr { binop Eq   $1 $3 }
-  | expr NEQ  expr { binop Neq  $1 $3 }
   | expr LT   expr { binop Lt   $1 $3 }
   | expr LE   expr { binop Le   $1 $3 }
   | expr GT   expr { binop Gt   $1 $3 }
   | expr GE   expr { binop Ge   $1 $3 }
+  | expr EQ   expr { binop Eq   $1 $3 }
+  | expr NEQ  expr { binop Neq  $1 $3 }
   | expr CONJ expr { binop Conj $1 $3 }
   | expr DISJ expr { binop Disj $1 $3 }
 
